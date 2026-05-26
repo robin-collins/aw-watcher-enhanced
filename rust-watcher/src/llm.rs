@@ -200,19 +200,43 @@ impl LlmClient {
         match self.config.provider.as_str() {
             "ollama" => {
                 let url = format!("{}/api/tags", self.config.base_url.trim_end_matches('/'));
-                let resp = self
-                    .send_with_auth(self.client.get(url))?
-                    .json::<OllamaModelListResponse>()
-                    .map_err(|e| format!("Failed to parse ollama model list: {e}"))?;
-                Ok(resp.models.into_iter().map(|m| m.name).collect())
+                let resp = self.send_with_auth(self.client.get(&url))?;
+                let status = resp.status();
+                let headers = resp.headers().clone();
+                let text = resp
+                    .text()
+                    .map_err(|e| format!("Failed to read ollama model list response: {e}"))?;
+                let resp_data = serde_json::from_str::<OllamaModelListResponse>(&text)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse ollama model list: {e}\n\
+                            Request: GET {url}\n\
+                            Response Status: {status}\n\
+                            Response Headers: {headers:?}\n\
+                            Response Body: {text}"
+                        )
+                    })?;
+                Ok(resp_data.models.into_iter().map(|m| m.name).collect())
             }
             "openai_compatible" => {
                 let url = format!("{}/models", self.config.base_url.trim_end_matches('/'));
-                let resp = self
-                    .send_with_auth(self.client.get(url))?
-                    .json::<OpenAiModelListResponse>()
-                    .map_err(|e| format!("Failed to parse OpenAI-compatible model list: {e}"))?;
-                Ok(resp.data.into_iter().map(|m| m.id).collect())
+                let resp = self.send_with_auth(self.client.get(&url))?;
+                let status = resp.status();
+                let headers = resp.headers().clone();
+                let text = resp
+                    .text()
+                    .map_err(|e| format!("Failed to read OpenAI-compatible model list response: {e}"))?;
+                let resp_data = serde_json::from_str::<OpenAiModelListResponse>(&text)
+                    .map_err(|e| {
+                        format!(
+                            "Failed to parse OpenAI-compatible model list: {e}\n\
+                            Request: GET {url}\n\
+                            Response Status: {status}\n\
+                            Response Headers: {headers:?}\n\
+                            Response Body: {text}"
+                        )
+                    })?;
+                Ok(resp_data.data.into_iter().map(|m| m.id).collect())
             }
             other => Err(format!("Unsupported llm.provider '{other}'")),
         }
@@ -235,10 +259,24 @@ impl LlmClient {
             "{}/api/generate",
             self.config.base_url.trim_end_matches('/')
         );
-        let resp = self.send_with_auth(self.client.post(url).json(&body))?;
-        let data = resp
-            .json::<OllamaResponse>()
-            .map_err(|e| format!("Failed to parse ollama response: {e}"))?;
+        let resp = self.send_with_auth(self.client.post(&url).json(&body))?;
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let text = resp
+            .text()
+            .map_err(|e| format!("Failed to read ollama response: {e}"))?;
+        let data = serde_json::from_str::<OllamaResponse>(&text)
+            .map_err(|e| {
+                format!(
+                    "Failed to parse ollama response: {e}\n\
+                    Request: POST {url}\n\
+                    Request Body: {}\n\
+                    Response Status: {status}\n\
+                    Response Headers: {headers:?}\n\
+                    Response Body: {text}",
+                    serde_json::to_string(&body).unwrap_or_default()
+                )
+            })?;
         Ok(data.response)
     }
 
@@ -263,10 +301,24 @@ impl LlmClient {
             "{}/chat/completions",
             self.config.base_url.trim_end_matches('/')
         );
-        let resp = self.send_with_auth(self.client.post(url).json(&req))?;
-        let data = resp
-            .json::<OpenAiChatResponse>()
-            .map_err(|e| format!("Failed to parse OpenAI-compatible response: {e}"))?;
+        let resp = self.send_with_auth(self.client.post(&url).json(&req))?;
+        let status = resp.status();
+        let headers = resp.headers().clone();
+        let text = resp
+            .text()
+            .map_err(|e| format!("Failed to read OpenAI-compatible response: {e}"))?;
+        let data = serde_json::from_str::<OpenAiChatResponse>(&text)
+            .map_err(|e| {
+                format!(
+                    "Failed to parse OpenAI-compatible response: {e}\n\
+                    Request: POST {url}\n\
+                    Request Body: {}\n\
+                    Response Status: {status}\n\
+                    Response Headers: {headers:?}\n\
+                    Response Body: {text}",
+                    serde_json::to_string(&req).unwrap_or_default()
+                )
+            })?;
         let content = data
             .choices
             .first()
@@ -297,7 +349,11 @@ impl LlmClient {
             return Err("Authentication failed: verify llm.api_key".into());
         }
         if !status.is_success() {
-            return Err(format!("LLM provider returned HTTP {}", status));
+            let body_text = resp.text().unwrap_or_else(|_| "<failed to read response body>".to_string());
+            return Err(format!(
+                "LLM provider returned HTTP {} - Response Body: {}",
+                status, body_text
+            ));
         }
         Ok(resp)
     }
