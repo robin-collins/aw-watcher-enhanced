@@ -4,8 +4,8 @@ mod categorizer;
 mod config;
 mod document;
 mod file_tracker;
-mod idle;
 mod ide_merger;
+mod idle;
 mod llm;
 mod meeting;
 mod ocr;
@@ -195,13 +195,24 @@ fn main() {
                 os_listener.start();
 
                 let _llm_client = if !no_ocr && config.llm.enabled {
-                    let c = llm::LlmClient::new(&config.llm);
-                    if c.is_available() {
-                        info!("LLM (Ollama) available: {}", config.llm.model);
-                        Some(c)
-                    } else {
-                        info!("LLM (Ollama) not available, skipping OCR summarization");
-                        None
+                    match llm::LlmClient::new(&config.llm) {
+                        Ok(c) => match c.validate_startup() {
+                            Ok(()) => {
+                                info!(
+                                    "LLM provider '{}' ready with model '{}'",
+                                    config.llm.provider, config.llm.model
+                                );
+                                Some(c)
+                            }
+                            Err(e) => {
+                                error!("LLM startup validation failed: {e}");
+                                std::process::exit(1);
+                            }
+                        },
+                        Err(e) => {
+                            error!("Invalid LLM configuration: {e}");
+                            std::process::exit(1);
+                        }
                     }
                 } else {
                     None
@@ -242,8 +253,7 @@ fn main() {
                         }
 
                         // Parse document context
-                        if let Some(doc) =
-                            document::parse_document_context(&info.app, &info.title)
+                        if let Some(doc) = document::parse_document_context(&info.app, &info.title)
                         {
                             if let Some(f) = &doc.filename {
                                 data.insert("doc_file".into(), f.clone().into());
@@ -280,7 +290,10 @@ fn main() {
 
                         // Categorize (after browser merge so URL/domain are available)
                         let category = categorizer::categorize_with_url(
-                            &info.app, &effective_title, &url, &domain,
+                            &info.app,
+                            &effective_title,
+                            &url,
+                            &domain,
                         );
                         data.insert("category".into(), category.into());
 
@@ -317,9 +330,7 @@ fn main() {
                         let term_name = ide_terminal.split_whitespace().next().unwrap_or("");
                         let is_claude_terminal = !term_name.is_empty()
                             && term_name.contains('.')
-                            && term_name
-                                .chars()
-                                .all(|c| c.is_ascii_digit() || c == '.');
+                            && term_name.chars().all(|c| c.is_ascii_digit() || c == '.');
 
                         if title_lower.contains("claude") || is_claude_terminal {
                             data.insert("ai_assistant".into(), "claude_code".into());
@@ -333,10 +344,7 @@ fn main() {
 
                         // Meeting detection
                         if config.meeting.enabled {
-                            let url = data
-                                .get("url")
-                                .and_then(|v| v.as_str())
-                                .unwrap_or("");
+                            let url = data.get("url").and_then(|v| v.as_str()).unwrap_or("");
                             let (in_meeting, platform) = meeting_detector.detect(
                                 &info.app,
                                 &info.title,
@@ -446,7 +454,9 @@ fn main() {
                                 data: volatile,
                             };
                             let snap_pulse = config.watcher.poll_time + 1.0;
-                            if let Err(e) = client.heartbeat(&snapshot_bucket_id, &snap_event, snap_pulse) {
+                            if let Err(e) =
+                                client.heartbeat(&snapshot_bucket_id, &snap_event, snap_pulse)
+                            {
                                 debug!("Snapshot heartbeat failed: {e}");
                             }
                         }
@@ -482,13 +492,17 @@ fn main() {
         thread::Builder::new()
             .name("heartbeat".into())
             .spawn(move || {
-                info!("Heartbeat thread started ({}s interval)", config.watcher.heartbeat_interval);
+                info!(
+                    "Heartbeat thread started ({}s interval)",
+                    config.watcher.heartbeat_interval
+                );
                 let mut last_window: Option<(String, String)> = None;
                 // Cache the last enriched data so every heartbeat sends consistent fields.
                 // Without this, heartbeats alternate between 2-key basic and 22-key enriched
                 // data, preventing the server from merging them into continuous events.
                 let mut last_enriched: Option<serde_json::Map<String, serde_json::Value>> = None;
-                let mut idle_detector = idle::IdleDetector::new(config.smart_capture.idle_threshold);
+                let mut idle_detector =
+                    idle::IdleDetector::new(config.smart_capture.idle_threshold);
                 let sleep_ms = (config.watcher.heartbeat_interval * 1000.0) as u64;
                 let pulsetime = config.watcher.heartbeat_interval + 1.0;
 

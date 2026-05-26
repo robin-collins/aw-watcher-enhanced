@@ -66,9 +66,15 @@ pub struct OcrConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    pub model: String,
-    pub timeout: f64,
     pub enabled: bool,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub request_timeout: f64,
+    #[serde(default)]
+    pub timeout: Option<f64>,
+    pub max_retries: u32,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +110,14 @@ pub struct CategorizationConfig {
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
+
+impl Config {
+    /// Apply backward-compatible transforms after deserialization.
+    pub fn with_backward_compat(mut self) -> Self {
+        self.llm = self.llm.finalize();
+        self
+    }
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -188,10 +202,51 @@ impl Default for OcrConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model: "gemma3:4b".into(),
-            timeout: 10.0,
             enabled: true,
+            provider: "ollama".into(),
+            base_url: "http://localhost:11434".into(),
+            model: "gemma3:4b".into(),
+            request_timeout: 10.0,
+            timeout: None,
+            max_retries: 1,
+            api_key: None,
         }
+    }
+}
+
+impl LlmConfig {
+    /// Validate required LLM fields and provider values.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.provider.trim().is_empty() {
+            return Err("llm.provider is required (ollama|openai_compatible)".into());
+        }
+        if self.base_url.trim().is_empty() {
+            return Err("llm.base_url is required".into());
+        }
+        if !(self.base_url.starts_with("http://") || self.base_url.starts_with("https://")) {
+            return Err("llm.base_url must start with http:// or https://".into());
+        }
+        if self.model.trim().is_empty() {
+            return Err("llm.model is required".into());
+        }
+        if self.request_timeout <= 0.0 {
+            return Err("llm.request_timeout must be > 0".into());
+        }
+        match self.provider.as_str() {
+            "ollama" | "openai_compatible" => Ok(()),
+            other => Err(format!(
+                "Unsupported llm.provider '{}'. Supported: ollama, openai_compatible",
+                other
+            )),
+        }
+    }
+
+    /// Keep compatibility with older configs that used `timeout`.
+    pub fn finalize(mut self) -> Self {
+        if let Some(legacy) = self.timeout {
+            self.request_timeout = legacy;
+        }
+        self
     }
 }
 
@@ -264,41 +319,132 @@ pub fn load_config() -> Config {
     let config_dir = get_config_dir();
     let config_file = config_dir.join("config.toml");
 
-    if config_file.exists() {
-        match fs::read_to_string(&config_file) {
-            Ok(contents) => match toml::from_str::<Config>(&contents) {
-                Ok(config) => {
-                    log::info!("Loaded config from {}", config_file.display());
-                    return config;
-                }
-                Err(e) => {
-                    log::error!("Error parsing config: {e}");
-                }
-            },
-            Err(e) => {
-                log::error!("Error reading config file: {e}");
-            }
-        }
-    } else {
-        // Create default config file
-        let _ = fs::create_dir_all(&config_dir);
-        let config = Config::default();
-        match toml::to_string_pretty(&config) {
-            Ok(contents) => {
-                if let Err(e) = fs::write(&config_file, contents) {
-                    log::warn!("Could not write default config: {e}");
-                } else {
-                    log::info!("Created default config at {}", config_file.display());
-                }
-            }
-            Err(e) => {
-                log::warn!("Could not serialize default config: {e}");
-            }
-        }
-        return config;
+    if let Err(e) = fs::create_dir_all(&config_dir) {
+        log::warn!(
+            "Could not create config directory '{}': {e}",
+            config_dir.display()
+        );
     }
 
-    Config::default()
+    if !config_file.exists() {
+        let config = reset_config_to_default_with_examples(&config_file);
+        log::info!(
+            "No config file found. Created default config at {}",
+            config_file.display()
+        );
+        return config.with_backward_compat();
+    }
+
+    match fs::read_to_string(&config_file) {
+        Ok(contents) => match toml::from_str::<Config>(&contents) {
+            Ok(config) => {
+                log::info!("Loaded config from {}", config_file.display());
+                return config.with_backward_compat();
+            }
+            Err(e) => {
+                log::error!(
+                    "Config parse error in '{}': {e}. Replacing with default config template.",
+                    config_file.display()
+                );
+            }
+        },
+        Err(e) => {
+            log::error!(
+                "Error reading config file '{}': {e}. Replacing with default config template.",
+                config_file.display()
+            );
+        }
+    }
+
+    reset_config_to_default_with_examples(&config_file).with_backward_compat()
+}
+
+fn reset_config_to_default_with_examples(config_file: &PathBuf) -> Config {
+    let config = Config::default();
+    let contents = build_default_config_template(&config);
+
+    if let Err(e) = fs::write(config_file, contents) {
+        log::warn!(
+            "Could not write default config template to '{}': {e}",
+            config_file.display()
+        );
+    }
+
+    config
+}
+
+fn build_default_config_template(config: &Config) -> String {
+    let mut template = match toml::to_string_pretty(config) {
+        Ok(serialized) => serialized,
+        Err(e) => {
+            log::warn!("Could not serialize default config: {e}");
+            String::new()
+        }
+    };
+
+    template.push_str(
+        r#"
+
+# -----------------------------------------------------------------------------
+# Alternative settings examples (commented out)
+# Uncomment and edit any line(s) below to quickly customize behavior.
+# -----------------------------------------------------------------------------
+
+# [watcher]
+# heartbeat_interval = 2.0
+# poll_time = 3.0
+# pulsetime = 8.0
+
+# [smart_capture]
+# idle_threshold = 120.0
+# min_ocr_interval = 10.0
+# full_capture_interval = 60.0
+# remote_desktop_apps = ["Microsoft Remote Desktop", "AnyDesk", "TeamViewer"]
+
+# [smart_capture.ocr_diff]
+# similarity_threshold = 0.9
+# min_change_chars = 25
+
+# [ocr]
+# enabled = true
+# trigger = "periodic"            # "adaptive" or "periodic"
+# periodic_interval = 20
+# engine = "screenpipe"           # "auto", "screenpipe", "native", etc.
+# extract_mode = "summary"        # "keywords" or "summary"
+# max_keywords = 30
+
+# [llm]
+# enabled = true
+# provider = "openai_compatible"  # "ollama" or "openai_compatible"
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4.1-mini"
+# request_timeout = 20.0
+# max_retries = 2
+# api_key = "set-me-in-env-or-here"
+
+# [browser]
+# enabled = true
+# merge_with_window = false
+# bucket_refresh_interval = 120
+
+# [meeting]
+# enabled = true
+# detect_subprocess = false
+
+# [privacy]
+# exclude_apps = ["1Password.exe", "KeePass.exe", "Bitwarden.exe", "Obsidian.exe"]
+# exclude_titles = [".*[Pp]assword.*", ".*[Ss]ecret.*", ".*[Cc]onfidential.*"]
+# exclude_urls = [".*bank.*", ".*paypal.*", ".*accounts.google.com.*"]
+# redact_emails = true
+# redact_phones = true
+# redact_patterns = ["AKIA[0-9A-Z]{16}", "ghp_[A-Za-z0-9]{36}"]
+
+# [categorization]
+# enabled = false
+"#,
+    );
+
+    template
 }
 
 #[cfg(test)]
@@ -320,7 +466,10 @@ mod tests {
         let config = Config::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.watcher.heartbeat_interval, config.watcher.heartbeat_interval);
+        assert_eq!(
+            parsed.watcher.heartbeat_interval,
+            config.watcher.heartbeat_interval
+        );
         assert_eq!(parsed.ocr.trigger, config.ocr.trigger);
     }
 
