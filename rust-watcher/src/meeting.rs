@@ -6,6 +6,7 @@
 //! - Browser URLs (Google Meet, etc.)
 
 use std::collections::HashMap;
+use std::process::Command;
 use std::sync::LazyLock;
 use std::time::Instant;
 

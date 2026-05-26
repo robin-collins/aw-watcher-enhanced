@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use chrono::Utc;
-use log::info;
+use log::{info, debug};
 
 /// A captured OS event.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -280,10 +280,10 @@ mod macos {
 #[cfg(target_os = "windows")]
 mod windows {
     use super::*;
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::UI::WindowsAndMessaging::{
+    use ::windows::Win32::Foundation::HWND;
+    use ::windows::Win32::System::ProcessStatus::GetModuleFileNameExW;
+    use ::windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use ::windows::Win32::UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowThreadProcessId,
     };
 
@@ -350,7 +350,7 @@ mod windows {
 
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
             let mut buf = [0u16; 260];
-            let len = GetModuleFileNameExW(Some(handle), None, &mut buf);
+            let len = GetModuleFileNameExW(handle, None, &mut buf);
             if len == 0 {
                 return None;
             }
