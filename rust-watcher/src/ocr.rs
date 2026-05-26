@@ -5,7 +5,7 @@
 //! Captures the current screen and extracts text using Apple's native
 //! VNRecognizeTextRequest. Zero external dependencies for OCR.
 
-use log::{info, warn};
+use log::info;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -52,7 +52,7 @@ impl OcrEngine {
     }
 
     /// Capture a specific window (by CGWindowID) or full screen if None.
-    pub fn capture_and_ocr_window(&mut self, window_id: Option<u32>) -> Option<OcrResult> {
+    pub fn capture_and_ocr_window(&mut self, _window_id: Option<u32>) -> Option<OcrResult> {
         if !self.available {
             return None;
         }

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use chrono::Utc;
-use log::{debug, info};
+use log::info;
 
 /// A captured OS event.
 #[derive(Debug, Clone, serde::Serialize)]
