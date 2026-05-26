@@ -658,7 +658,7 @@ fn quick_enriched_data(window: &WindowInfo) -> serde_json::Map<String, serde_jso
     }
 
     // Category (pure function)
-    let category = categorizer::categorize_with_url(&window.app, &window.title, "", "");
+    let category = categorizer::categorize(&window.app, &window.title);
     m.insert("category".into(), category.into());
 
     m
