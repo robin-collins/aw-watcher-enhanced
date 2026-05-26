@@ -27,6 +27,15 @@ pub struct WatcherConfig {
     pub heartbeat_interval: f64,
     pub poll_time: f64,
     pub pulsetime: f64,
+    /// Emit verbose tracing around OCR captures and LLM calls.
+    /// Forces the log level to `debug` and adds extra `[debug]` lines
+    /// inside ocr.rs/llm.rs that cover request URLs, durations, and
+    /// payload sizes. Off by default.
+    pub debug: bool,
+    /// Include the millisecond timestamp prefix on each log line.
+    /// On by default to preserve previous behaviour; set to false for
+    /// short, easy-to-grep log lines.
+    pub debug_timestamps: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -140,6 +149,8 @@ impl Default for WatcherConfig {
             heartbeat_interval: 1.0,
             poll_time: 5.0,
             pulsetime: 6.0,
+            debug: false,
+            debug_timestamps: true,
         }
     }
 }
@@ -394,6 +405,8 @@ fn build_default_config_template(config: &Config) -> String {
 # heartbeat_interval = 2.0
 # poll_time = 3.0
 # pulsetime = 8.0
+# debug = true                    # Verbose OCR/LLM tracing
+# debug_timestamps = false        # Drop the timestamp prefix from log lines
 
 # [smart_capture]
 # idle_threshold = 120.0

@@ -56,4 +56,12 @@ windows = { version = "0.58", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_Graphics_Gdi",
+    "Win32_Storage_Xps",  # PrintWindow lives here in windows-rs bindings
+    "Win32_System_WinRT",
+    # WinRT bindings used by ocr.rs for Windows.Media.Ocr
+    "Foundation",
+    "Foundation_Collections",
+    "Graphics_Imaging",
+    "Storage_Streams",
+    "Media_Ocr",
 ] }

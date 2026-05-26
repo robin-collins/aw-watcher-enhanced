@@ -12,13 +12,17 @@ pub struct WindowInfo {
     pub title: String,
 }
 
-/// Get the CGWindowID of the frontmost/focused window (macOS only).
+/// Get the raw window identifier of the frontmost/focused window.
+/// macOS: CGWindowID (u32 widened to u64). Windows: raw HWND.
 /// Used to capture just the focused window for OCR instead of the full screen.
-pub fn get_focused_window_id() -> Option<u32> {
+pub fn get_focused_window_id() -> Option<u64> {
     #[cfg(target_os = "macos")]
-    return macos::get_focused_window_id();
+    return macos::get_focused_window_id().map(|w| w as u64);
 
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(target_os = "windows")]
+    return windows::get_focused_window_id();
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     None
 }
 
@@ -421,6 +425,20 @@ mod windows {
             let app = get_process_name(pid).unwrap_or_else(|| "unknown".to_string());
 
             Some(WindowInfo { app, title })
+        }
+    }
+
+    /// Return the raw HWND of the foreground window as u64.
+    /// HWNDs are pointer-sized; casting through `isize` then `u64` is the
+    /// canonical lossless round-trip the windows-rs docs recommend.
+    pub fn get_focused_window_id() -> Option<u64> {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.0.is_null() {
+                None
+            } else {
+                Some(hwnd.0 as isize as u64)
+            }
         }
     }
 

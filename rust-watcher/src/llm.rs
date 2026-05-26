@@ -8,6 +8,7 @@
 use std::time::Duration;
 
 use log::{debug, info};
+use std::time::Instant;
 use reqwest::blocking::{Client, RequestBuilder};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
@@ -110,11 +111,16 @@ struct OpenAiModel {
 pub struct LlmClient {
     client: Client,
     config: LlmConfig,
+    debug: bool,
 }
 
 impl LlmClient {
     /// Build and validate a provider-specific LLM client.
     pub fn new(config: &LlmConfig) -> Result<Self, String> {
+        Self::new_with_debug(config, false)
+    }
+
+    pub fn new_with_debug(config: &LlmConfig, debug: bool) -> Result<Self, String> {
         config.validate()?;
 
         let client = Client::builder()
@@ -122,9 +128,17 @@ impl LlmClient {
             .build()
             .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
 
+        if debug {
+            info!(
+                "[debug] LLM client ready: provider={}, base_url={}, model={}, timeout={}s",
+                config.provider, config.base_url, config.model, config.request_timeout
+            );
+        }
+
         Ok(Self {
             client,
             config: config.clone(),
+            debug,
         })
     }
 
@@ -161,6 +175,13 @@ impl LlmClient {
         title: &str,
     ) -> Option<LlmSummary> {
         if !self.config.enabled || ocr_text.trim().is_empty() {
+            if self.debug {
+                info!(
+                    "[debug] LLM skipped: enabled={}, ocr_text_empty={}",
+                    self.config.enabled,
+                    ocr_text.trim().is_empty()
+                );
+            }
             return None;
         }
 
@@ -181,16 +202,54 @@ impl LlmClient {
         };
         let prompt = format!("{TEXT_SUMMARIZE_PROMPT}{context}\"{text}\"");
 
+        if self.debug {
+            info!(
+                "[debug] LLM request: provider={}, model={}, prompt={} bytes (ocr {} bytes, truncated={}), app={app:?}, title={title:?}",
+                self.config.provider,
+                self.config.model,
+                prompt.len(),
+                ocr_text.len(),
+                ocr_text.len() > 2000
+            );
+        }
+        let started = Instant::now();
+
         let response = match self.config.provider.as_str() {
             "ollama" => self.send_ollama_request(&prompt),
             "openai_compatible" => self.send_openai_request(&prompt),
             other => Err(format!("Unsupported llm.provider '{other}'")),
         };
 
+        let elapsed_ms = started.elapsed().as_millis();
+
         match response {
-            Ok(content) => parse_llm_response(&content),
+            Ok(content) => {
+                if self.debug {
+                    let preview: String = content.chars().take(200).collect();
+                    info!(
+                        "[debug] LLM response in {elapsed_ms}ms: {} bytes | preview: {}",
+                        content.len(),
+                        preview.replace('\n', " / ")
+                    );
+                }
+                let parsed = parse_llm_response(&content);
+                if self.debug {
+                    match &parsed {
+                        Some(s) => info!(
+                            "[debug] LLM parsed: summary={:?}, client={:?}, project={:?}, {} keywords",
+                            s.summary, s.client, s.project, s.keywords.len()
+                        ),
+                        None => info!("[debug] LLM parse failed (response not valid JSON)"),
+                    }
+                }
+                parsed
+            }
             Err(e) => {
-                debug!("LLM request failed: {e}");
+                if self.debug {
+                    info!("[debug] LLM request failed in {elapsed_ms}ms: {e}");
+                } else {
+                    debug!("LLM request failed: {e}");
+                }
                 None
             }
         }

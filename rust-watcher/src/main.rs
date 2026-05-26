@@ -70,13 +70,30 @@ const VOLATILE_KEYS: &[&str] = &[
 fn main() {
     let args = Args::parse();
 
-    // Initialize logging
-    let log_level = if args.verbose { "debug" } else { "info" };
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level))
-        .format_timestamp_millis()
-        .init();
+    // Load configuration up-front so [watcher].debug can influence log level.
+    let config = config::load_config();
+    let debug_cfg = config.watcher.debug;
+
+    // Initialize logging — --verbose CLI flag or `[watcher] debug = true`
+    // both raise the floor to debug.
+    let log_level = if args.verbose || debug_cfg {
+        "debug"
+    } else {
+        "info"
+    };
+    let mut log_builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(log_level));
+    if config.watcher.debug_timestamps {
+        log_builder.format_timestamp_millis();
+    } else {
+        log_builder.format_timestamp(None);
+    }
+    log_builder.init();
 
     info!("Starting {WATCHER_NAME}");
+    if debug_cfg {
+        info!("[debug] verbose OCR/LLM tracing enabled via [watcher].debug = true");
+    }
 
     // Check Accessibility permission (macOS) — required for AX API window capture.
     // If not granted, opens System Settings prompt for the user to approve.
@@ -88,8 +105,6 @@ fn main() {
         }
     }
 
-    // Load configuration
-    let config = config::load_config();
     info!(
         "Config: heartbeat={}s, enrichment={}s, idle_threshold={}s",
         config.watcher.heartbeat_interval,
@@ -178,9 +193,10 @@ fn main() {
                 let mut ide_merger = ide_merger::IdeDataMerger::new();
                 let mut meeting_detector = meeting::MeetingDetector::new();
                 let mut ocr_engine = if !no_ocr && config.ocr.enabled {
-                    let engine = ocr::OcrEngine::new(
+                    let engine = ocr::OcrEngine::new_with_debug(
                         config.smart_capture.min_ocr_interval,
                         config.ocr.max_keywords,
+                        config.watcher.debug,
                     );
                     if engine.is_available() {
                         info!("OCR engine available");
@@ -195,7 +211,7 @@ fn main() {
                 os_listener.start();
 
                 let _llm_client = if !no_ocr && config.llm.enabled {
-                    match llm::LlmClient::new(&config.llm) {
+                    match llm::LlmClient::new_with_debug(&config.llm, config.watcher.debug) {
                         Ok(c) => match c.validate_startup() {
                             Ok(()) => {
                                 info!(
