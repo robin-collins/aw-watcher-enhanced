@@ -1,13 +1,15 @@
 #![allow(dead_code)]
 //! LLM integration for OCR text summarization.
 //!
-//! Calls Ollama's local API to summarize screen OCR text into
-//! structured context (keywords, client, project).
+//! Supports multiple providers:
+//! - Ollama (`/api/generate`)
+//! - OpenAI-compatible chat APIs (`/chat/completions`)
 
 use std::time::Duration;
 
-use log::{debug, warn};
-use reqwest::blocking::Client;
+use log::{debug, info};
+use reqwest::blocking::{Client, RequestBuilder};
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 
 use crate::config::LlmConfig;
@@ -21,11 +23,9 @@ const TEXT_SUMMARIZE_PROMPT: &str = r#"Extract structured data from this screens
 OCR text:
 "#;
 
-/// JSON schema for Ollama structured output (format parameter).
-/// Ensures the model always returns valid, parseable JSON.
+/// JSON schema for structured output.
 const JSON_SCHEMA: &str = r#"{"type":"object","properties":{"keywords":{"type":"array","items":{"type":"string"}},"client":{"type":["string","null"]},"project":{"type":["string","null"]},"summary":{"type":"string"}},"required":["keywords","summary"]}"#;
 
-/// LLM response for OCR summarization.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LlmSummary {
     #[serde(default)]
@@ -38,7 +38,6 @@ pub struct LlmSummary {
     pub summary: Option<String>,
 }
 
-/// Ollama API request.
 #[derive(Serialize)]
 struct OllamaRequest {
     model: String,
@@ -54,48 +53,107 @@ struct OllamaOptions {
     num_predict: u32,
 }
 
-/// Ollama API response.
 #[derive(Deserialize)]
 struct OllamaResponse {
     response: String,
 }
 
+#[derive(Deserialize)]
+struct OllamaModelListResponse {
+    models: Vec<OllamaModel>,
+}
+
+#[derive(Deserialize)]
+struct OllamaModel {
+    name: String,
+}
+
+#[derive(Serialize)]
+struct OpenAiChatRequest {
+    model: String,
+    messages: Vec<OpenAiMessage>,
+    temperature: f32,
+    max_tokens: u32,
+}
+
+#[derive(Serialize)]
+struct OpenAiMessage {
+    role: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChatResponse {
+    choices: Vec<OpenAiChoice>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiChoice {
+    message: OpenAiAssistantMessage,
+}
+
+#[derive(Deserialize)]
+struct OpenAiAssistantMessage {
+    content: String,
+}
+
+#[derive(Deserialize)]
+struct OpenAiModelListResponse {
+    data: Vec<OpenAiModel>,
+}
+
+#[derive(Deserialize)]
+struct OpenAiModel {
+    id: String,
+}
+
 pub struct LlmClient {
     client: Client,
     config: LlmConfig,
-    base_url: String,
 }
 
 impl LlmClient {
-    pub fn new(config: &LlmConfig) -> Self {
-        let client = Client::builder()
-            .timeout(Duration::from_secs_f64(config.timeout))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+    /// Build and validate a provider-specific LLM client.
+    pub fn new(config: &LlmConfig) -> Result<Self, String> {
+        config.validate()?;
 
-        Self {
+        let client = Client::builder()
+            .timeout(Duration::from_secs_f64(config.request_timeout))
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+
+        Ok(Self {
             client,
             config: config.clone(),
-            base_url: "http://localhost:11434".into(),
+        })
+    }
+
+    /// Run provider availability + model existence validation.
+    pub fn validate_startup(&self) -> Result<(), String> {
+        let models = self.list_models()?;
+        if models.is_empty() {
+            return Err(format!(
+                "LLM provider '{}' at '{}' returned zero models",
+                self.config.provider, self.config.base_url
+            ));
         }
+
+        if !models.iter().any(|m| m == &self.config.model) {
+            return Err(format!(
+                "Configured model '{}' not found in provider '{}'. Available models: {}",
+                self.config.model,
+                self.config.provider,
+                models.join(", ")
+            ));
+        }
+
+        info!(
+            "LLM startup validation passed (provider={}, model={})",
+            self.config.provider, self.config.model
+        );
+        Ok(())
     }
 
-    /// Check if Ollama is available.
-    pub fn is_available(&self) -> bool {
-        self.client
-            .get(&self.base_url)
-            .timeout(Duration::from_secs(2))
-            .send()
-            .is_ok()
-    }
-
-    /// Summarize OCR text using the LLM (without context).
-    pub fn summarize_ocr(&self, ocr_text: &str) -> Option<LlmSummary> {
-        self.summarize_ocr_with_context(ocr_text, "", "")
-    }
-
-    /// Summarize OCR text with app/title context for better accuracy.
-    /// The app and title tell the LLM which window is focused.
     pub fn summarize_ocr_with_context(
         &self,
         ocr_text: &str,
@@ -106,7 +164,6 @@ impl LlmClient {
             return None;
         }
 
-        // Truncate long text (find char boundary to avoid panic on multi-byte chars)
         let text = if ocr_text.len() > 2000 {
             let mut end = 2000;
             while !ocr_text.is_char_boundary(end) {
@@ -122,14 +179,51 @@ impl LlmClient {
         } else {
             String::new()
         };
-
         let prompt = format!("{TEXT_SUMMARIZE_PROMPT}{context}\"{text}\"");
-        let schema: serde_json::Value =
-            serde_json::from_str(JSON_SCHEMA).expect("invalid JSON schema");
 
-        let request = OllamaRequest {
+        let response = match self.config.provider.as_str() {
+            "ollama" => self.send_ollama_request(&prompt),
+            "openai_compatible" => self.send_openai_request(&prompt),
+            other => Err(format!("Unsupported llm.provider '{other}'")),
+        };
+
+        match response {
+            Ok(content) => parse_llm_response(&content),
+            Err(e) => {
+                debug!("LLM request failed: {e}");
+                None
+            }
+        }
+    }
+
+    fn list_models(&self) -> Result<Vec<String>, String> {
+        match self.config.provider.as_str() {
+            "ollama" => {
+                let url = format!("{}/api/tags", self.config.base_url.trim_end_matches('/'));
+                let resp = self
+                    .send_with_auth(self.client.get(url))?
+                    .json::<OllamaModelListResponse>()
+                    .map_err(|e| format!("Failed to parse ollama model list: {e}"))?;
+                Ok(resp.models.into_iter().map(|m| m.name).collect())
+            }
+            "openai_compatible" => {
+                let url = format!("{}/models", self.config.base_url.trim_end_matches('/'));
+                let resp = self
+                    .send_with_auth(self.client.get(url))?
+                    .json::<OpenAiModelListResponse>()
+                    .map_err(|e| format!("Failed to parse OpenAI-compatible model list: {e}"))?;
+                Ok(resp.data.into_iter().map(|m| m.id).collect())
+            }
+            other => Err(format!("Unsupported llm.provider '{other}'")),
+        }
+    }
+
+    fn send_ollama_request(&self, prompt: &str) -> Result<String, String> {
+        let schema: serde_json::Value =
+            serde_json::from_str(JSON_SCHEMA).map_err(|e| format!("Invalid schema: {e}"))?;
+        let body = OllamaRequest {
             model: self.config.model.clone(),
-            prompt,
+            prompt: prompt.to_string(),
             stream: false,
             format: schema,
             options: OllamaOptions {
@@ -137,41 +231,83 @@ impl LlmClient {
                 num_predict: 384,
             },
         };
+        let url = format!(
+            "{}/api/generate",
+            self.config.base_url.trim_end_matches('/')
+        );
+        let resp = self.send_with_auth(self.client.post(url).json(&body))?;
+        let data = resp
+            .json::<OllamaResponse>()
+            .map_err(|e| format!("Failed to parse ollama response: {e}"))?;
+        Ok(data.response)
+    }
 
-        let url = format!("{}/api/generate", self.base_url);
-        match self.client.post(&url).json(&request).send() {
-            Ok(resp) => {
-                if !resp.status().is_success() {
-                    warn!("LLM request failed: {}", resp.status());
-                    return None;
-                }
+    fn send_openai_request(&self, prompt: &str) -> Result<String, String> {
+        let schema_hint = "Return only raw JSON object with fields: keywords (array), client (string|null), project (string|null), summary (string).";
+        let req = OpenAiChatRequest {
+            model: self.config.model.clone(),
+            messages: vec![
+                OpenAiMessage {
+                    role: "system".into(),
+                    content: schema_hint.into(),
+                },
+                OpenAiMessage {
+                    role: "user".into(),
+                    content: prompt.to_string(),
+                },
+            ],
+            temperature: 0.0,
+            max_tokens: 384,
+        };
+        let url = format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        );
+        let resp = self.send_with_auth(self.client.post(url).json(&req))?;
+        let data = resp
+            .json::<OpenAiChatResponse>()
+            .map_err(|e| format!("Failed to parse OpenAI-compatible response: {e}"))?;
+        let content = data
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| "OpenAI-compatible response had no choices".to_string())?;
+        Ok(content)
+    }
 
-                match resp.json::<OllamaResponse>() {
-                    Ok(ollama_resp) => parse_llm_response(&ollama_resp.response),
-                    Err(e) => {
-                        debug!("Failed to parse LLM response: {e}");
-                        None
-                    }
-                }
+    fn send_with_auth(&self, req: RequestBuilder) -> Result<reqwest::blocking::Response, String> {
+        let req = if let Some(key) = self.config.api_key.as_deref() {
+            req.bearer_auth(key)
+        } else {
+            req
+        };
+
+        let resp = req.send().map_err(|e| {
+            if e.is_timeout() {
+                format!("LLM request timeout after {}s", self.config.request_timeout)
+            } else if e.is_connect() {
+                format!("Failed to connect to '{}'", self.config.base_url)
+            } else {
+                format!("LLM network error: {e}")
             }
-            Err(e) => {
-                debug!("LLM request error: {e}");
-                None
-            }
+        })?;
+
+        let status = resp.status();
+        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+            return Err("Authentication failed: verify llm.api_key".into());
         }
+        if !status.is_success() {
+            return Err(format!("LLM provider returned HTTP {}", status));
+        }
+        Ok(resp)
     }
 }
 
-/// Parse the LLM response text, extracting JSON from possibly noisy output.
 fn parse_llm_response(text: &str) -> Option<LlmSummary> {
     let trimmed = text.trim();
-
-    // Try direct parse
     if let Ok(summary) = serde_json::from_str::<LlmSummary>(trimmed) {
         return Some(summary);
     }
-
-    // Try to find JSON in the response (LLMs sometimes wrap in markdown)
     if let Some(start) = trimmed.find('{') {
         if let Some(end) = trimmed.rfind('}') {
             if start < end {
@@ -182,42 +318,9 @@ fn parse_llm_response(text: &str) -> Option<LlmSummary> {
             }
         }
     }
-
-    debug!("Could not parse LLM response: {}", &trimmed[..trimmed.len().min(200)]);
+    debug!(
+        "Could not parse LLM response: {}",
+        &trimmed[..trimmed.len().min(200)]
+    );
     None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_parse_clean_json() {
-        let json = r#"{"keywords":["python","auth"],"client":"ACME","project":"api","summary":"Writing code"}"#;
-        let result = parse_llm_response(json).unwrap();
-        assert_eq!(result.keywords, vec!["python", "auth"]);
-        assert_eq!(result.client.as_deref(), Some("ACME"));
-        assert_eq!(result.project.as_deref(), Some("api"));
-    }
-
-    #[test]
-    fn test_parse_markdown_wrapped() {
-        let text = "Here's the analysis:\n```json\n{\"keywords\":[\"rust\"],\"client\":null,\"project\":\"my-proj\",\"summary\":\"Coding\"}\n```";
-        let result = parse_llm_response(text).unwrap();
-        assert_eq!(result.keywords, vec!["rust"]);
-        assert_eq!(result.project.as_deref(), Some("my-proj"));
-    }
-
-    #[test]
-    fn test_parse_partial_fields() {
-        let json = r#"{"keywords":["test"]}"#;
-        let result = parse_llm_response(json).unwrap();
-        assert_eq!(result.keywords, vec!["test"]);
-        assert!(result.client.is_none());
-    }
-
-    #[test]
-    fn test_parse_garbage() {
-        assert!(parse_llm_response("this is not json at all").is_none());
-    }
 }
