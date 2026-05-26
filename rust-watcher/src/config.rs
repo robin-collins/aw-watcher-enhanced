@@ -66,9 +66,15 @@ pub struct OcrConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LlmConfig {
-    pub model: String,
-    pub timeout: f64,
     pub enabled: bool,
+    pub provider: String,
+    pub base_url: String,
+    pub model: String,
+    pub request_timeout: f64,
+    #[serde(default)]
+    pub timeout: Option<f64>,
+    pub max_retries: u32,
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -104,6 +110,14 @@ pub struct CategorizationConfig {
 }
 
 // ─── Defaults ────────────────────────────────────────────────────────────────
+
+impl Config {
+    /// Apply backward-compatible transforms after deserialization.
+    pub fn with_backward_compat(mut self) -> Self {
+        self.llm = self.llm.finalize();
+        self
+    }
+}
 
 impl Default for Config {
     fn default() -> Self {
@@ -188,10 +202,51 @@ impl Default for OcrConfig {
 impl Default for LlmConfig {
     fn default() -> Self {
         Self {
-            model: "gemma3:4b".into(),
-            timeout: 10.0,
             enabled: true,
+            provider: "ollama".into(),
+            base_url: "http://localhost:11434".into(),
+            model: "gemma3:4b".into(),
+            request_timeout: 10.0,
+            timeout: None,
+            max_retries: 1,
+            api_key: None,
         }
+    }
+}
+
+impl LlmConfig {
+    /// Validate required LLM fields and provider values.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.provider.trim().is_empty() {
+            return Err("llm.provider is required (ollama|openai_compatible)".into());
+        }
+        if self.base_url.trim().is_empty() {
+            return Err("llm.base_url is required".into());
+        }
+        if !(self.base_url.starts_with("http://") || self.base_url.starts_with("https://")) {
+            return Err("llm.base_url must start with http:// or https://".into());
+        }
+        if self.model.trim().is_empty() {
+            return Err("llm.model is required".into());
+        }
+        if self.request_timeout <= 0.0 {
+            return Err("llm.request_timeout must be > 0".into());
+        }
+        match self.provider.as_str() {
+            "ollama" | "openai_compatible" => Ok(()),
+            other => Err(format!(
+                "Unsupported llm.provider '{}'. Supported: ollama, openai_compatible",
+                other
+            )),
+        }
+    }
+
+    /// Keep compatibility with older configs that used `timeout`.
+    pub fn finalize(mut self) -> Self {
+        if let Some(legacy) = self.timeout {
+            self.request_timeout = legacy;
+        }
+        self
     }
 }
 
@@ -269,7 +324,7 @@ pub fn load_config() -> Config {
             Ok(contents) => match toml::from_str::<Config>(&contents) {
                 Ok(config) => {
                     log::info!("Loaded config from {}", config_file.display());
-                    return config;
+                    return config.with_backward_compat();
                 }
                 Err(e) => {
                     log::error!("Error parsing config: {e}");
@@ -295,10 +350,10 @@ pub fn load_config() -> Config {
                 log::warn!("Could not serialize default config: {e}");
             }
         }
-        return config;
+        return config.with_backward_compat();
     }
 
-    Config::default()
+    Config::default().with_backward_compat()
 }
 
 #[cfg(test)]
@@ -320,7 +375,10 @@ mod tests {
         let config = Config::default();
         let toml_str = toml::to_string_pretty(&config).unwrap();
         let parsed: Config = toml::from_str(&toml_str).unwrap();
-        assert_eq!(parsed.watcher.heartbeat_interval, config.watcher.heartbeat_interval);
+        assert_eq!(
+            parsed.watcher.heartbeat_interval,
+            config.watcher.heartbeat_interval
+        );
         assert_eq!(parsed.ocr.trigger, config.ocr.trigger);
     }
 
