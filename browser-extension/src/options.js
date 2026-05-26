@@ -12,7 +12,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const incognitoTracking = document.getElementById('incognitoTracking');
   const excludeDomains = document.getElementById('excludeDomains');
   const excludePatterns = document.getElementById('excludePatterns');
-  const clientKeywords = document.getElementById('clientKeywords');
   const testConnectionBtn = document.getElementById('testConnection');
   const saveSettingsBtn = document.getElementById('saveSettings');
   const resetSettingsBtn = document.getElementById('resetSettings');
@@ -26,7 +25,6 @@ document.addEventListener('DOMContentLoaded', () => {
     incognitoTracking: false,
     excludeDomains: ['localhost', '127.0.0.1'],
     excludePatterns: [],
-    clientKeywords: {},
   };
 
   /**
@@ -41,12 +39,6 @@ document.addEventListener('DOMContentLoaded', () => {
       excludeDomains.value = items.excludeDomains.join('\n');
       excludePatterns.value = items.excludePatterns.join('\n');
 
-      // Convert client keywords object to text
-      const keywordsText = Object.entries(items.clientKeywords)
-        .map(([client, keywords]) => `${client}: ${keywords.join(', ')}`)
-        .join('\n');
-      clientKeywords.value = keywordsText;
-
       // Test connection after loading
       testConnection();
     });
@@ -56,15 +48,6 @@ document.addEventListener('DOMContentLoaded', () => {
    * Save settings to storage
    */
   function saveSettings() {
-    // Parse client keywords
-    const keywordsObj = {};
-    clientKeywords.value.split('\n').forEach(line => {
-      const [client, keywords] = line.split(':').map(s => s.trim());
-      if (client && keywords) {
-        keywordsObj[client] = keywords.split(',').map(k => k.trim()).filter(k => k);
-      }
-    });
-
     const settings = {
       serverUrl: serverUrl.value.trim(),
       trackUrls: trackUrls.checked,
@@ -72,7 +55,6 @@ document.addEventListener('DOMContentLoaded', () => {
       incognitoTracking: incognitoTracking.checked,
       excludeDomains: excludeDomains.value.split('\n').map(s => s.trim()).filter(s => s),
       excludePatterns: excludePatterns.value.split('\n').map(s => s.trim()).filter(s => s),
-      clientKeywords: keywordsObj,
     };
 
     chrome.storage.sync.set(settings, () => {

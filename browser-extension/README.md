@@ -1,12 +1,11 @@
 # ActivityWatch Enhanced - Browser Extension
 
-Browser extension for enhanced ActivityWatch tracking with URL capture, automatic categorization, and client/project detection.
+Browser extension for enhanced ActivityWatch tracking with URL capture and automatic categorization.
 
 ## Features
 
 - **Full URL Tracking**: Captures complete URLs, not just page titles
 - **Automatic Categorization**: Classifies browsing activity (Development, Email, Social Media, etc.)
-- **Client/Project Detection**: Detects clients from keywords in URLs and page titles
 - **Privacy Controls**: Exclude specific domains and URL patterns
 - **Incognito Support**: Optional tracking for private browsing
 - **Real-time Status**: See connection status and tracking activity
@@ -48,15 +47,12 @@ Access settings by clicking "Settings" in the popup or right-clicking the icon:
 - **Incognito Tracking**: Track private browsing (disabled by default)
 - **Excluded Domains**: Domains to never track (one per line)
 - **Excluded Patterns**: Regex patterns for URLs to exclude
-- **Client Keywords**: Define client detection keywords
 
-### Client Keywords Format
+### Note on Client/Project Detection
 
-```
-acme-corp: acme, project-x, acme.com
-bigcorp: bigcorp, initiative-y
-internal: company-name, intranet
-```
+Client/project extraction is performed by the Rust watcher (`rust-watcher`) via OCR + LLM
+enrichment, not by this browser extension. The extension only sends browser tab metadata
+(URL/title/domain/category) to ActivityWatch.
 
 ## Data Schema
 
