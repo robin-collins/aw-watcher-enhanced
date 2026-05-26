@@ -190,46 +190,50 @@ aw-watcher-enhanced --reclassify --start 2026-03-01 --end 2026-03-03            
 ## Configuration
 
 Config file locations:
-- **macOS**: `~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.yaml`
-- **Windows**: `%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.yaml`
+- **macOS**: `~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.toml`
+- **Windows**: `%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.toml`
+- **Linux**: `~/.config/activitywatch/aw-watcher-enhanced/config.toml`
 
-```yaml
-watcher:
-  poll_time: 5.0
-  pulsetime: 6.0
+```toml
+[watcher]
+poll_time = 5.0
+pulsetime = 6.0
 
-smart_capture:
-  idle_threshold: 60.0
-  remote_desktop_interval: 10.0
-  ocr_diff:
-    similarity_threshold: 0.85
-    min_change_chars: 50
+[smart_capture]
+idle_threshold = 60.0
+remote_desktop_interval = 10.0
 
-ocr:
-  enabled: true
-  trigger: adaptive       # adaptive, smart, window_change, periodic
-  periodic_interval: 30
-  adaptive_fallback_interval: 300  # 5-min safety net when data is rich
-  engine: auto
+[smart_capture.ocr_diff]
+similarity_threshold = 0.85
+min_change_chars = 50
 
-browser:
-  enabled: true           # Merge URL data from aw-watcher-web
+[ocr]
+enabled = true
+trigger = "adaptive"       # adaptive, smart, window_change, periodic
+periodic_interval = 30
+adaptive_fallback_interval = 300  # 5-min safety net when data is rich
+engine = "auto"
 
-meeting:
-  enabled: true           # Detect Zoom, Teams, Meet, etc.
-  detect_subprocess: true  # Check for Zoom CptHost, etc.
+[browser]
+enabled = true           # Merge URL data from aw-watcher-web
 
-llm:
-  enabled: true
-  model: "gemma3:4b"
-  timeout: 10.0
+[meeting]
+enabled = true           # Detect Zoom, Teams, Meet, etc.
+detect_subprocess = true  # Check for Zoom CptHost, etc.
 
-privacy:
-  exclude_apps:
-    - "1Password"
-    - "Keychain Access"
-  exclude_titles:
-    - ".*[Pp]assword.*"
+[llm]
+enabled = true
+model = "gemma3:4b"
+timeout = 10.0
+
+[privacy]
+exclude_apps = [
+  "1Password",
+  "Keychain Access"
+]
+exclude_titles = [
+  ".*[Pp]assword.*"
+]
 ```
 
 ## OCR Engines

@@ -108,10 +108,10 @@ pip install rapidocr_onnxruntime
 
 RapidOCR will be used automatically if Windows OCR is unavailable, or you can force it:
 
-```yaml
-# In config.yaml
-ocr:
-  engine: rapidocr
+```toml
+# In config.toml
+[ocr]
+engine = "rapidocr"
 ```
 
 ## Optional: LLM Enhancement (Ollama)
@@ -135,14 +135,14 @@ ollama pull gemma3:4b  # Recommended: fast and accurate
 
 Edit the config file:
 ```
-%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.yaml
+%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.toml
 ```
 
-```yaml
-llm:
-  enabled: true
-  model: "gemma3:4b"
-  timeout: 10.0
+```toml
+[llm]
+enabled = true
+model = "gemma3:4b"
+timeout = 10.0
 ```
 
 ## Optional: RAG Database (Qdrant)
@@ -203,64 +203,68 @@ nssm status aw-watcher-enhanced
 
 Config file location:
 ```
-%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.yaml
+%LOCALAPPDATA%\activitywatch\aw-watcher-enhanced\config.toml
 ```
 
 Or in PowerShell:
 ```powershell
-notepad $env:LOCALAPPDATA\activitywatch\aw-watcher-enhanced\config.yaml
+notepad $env:LOCALAPPDATA\activitywatch\aw-watcher-enhanced\config.toml
 ```
 
 ### Recommended Windows Config
 
-```yaml
-watcher:
-  poll_time: 5.0
-  pulsetime: 6.0
+```toml
+[watcher]
+poll_time = 5.0
+pulsetime = 6.0
 
-smart_capture:
-  idle_threshold: 60.0
-  idle_poll_time: 30.0
-  remote_desktop_interval: 10.0
-  remote_desktop_apps:
-    - "Microsoft Remote Desktop"
-    - "Windows App"
-    - "mstsc"
-    - "Remote Desktop Connection"
-    - "Citrix Workspace"
-    - "VMware Horizon"
-    - "TeamViewer"
-    - "AnyDesk"
-  ocr_diff:
-    similarity_threshold: 0.85
-    min_change_chars: 50
+[smart_capture]
+idle_threshold = 60.0
+idle_poll_time = 30.0
+remote_desktop_interval = 10.0
+remote_desktop_apps = [
+  "Microsoft Remote Desktop",
+  "Windows App",
+  "mstsc",
+  "Remote Desktop Connection",
+  "Citrix Workspace",
+  "VMware Horizon",
+  "TeamViewer",
+  "AnyDesk"
+]
 
-ocr:
-  enabled: true
-  trigger: adaptive     # Only fires OCR when primary data is thin
-  engine: auto          # Uses Windows OCR API
+[smart_capture.ocr_diff]
+similarity_threshold = 0.85
+min_change_chars = 50
 
-browser:
-  enabled: true         # Merge URL data from aw-watcher-web
+[ocr]
+enabled = true
+trigger = "adaptive"     # Only fires OCR when primary data is thin
+engine = "auto"          # Uses Windows OCR API
 
-meeting:
-  enabled: true
-  detect_subprocess: true
+[browser]
+enabled = true         # Merge URL data from aw-watcher-web
 
-llm:
-  enabled: false  # Set to true if Ollama is installed
-  model: gemma3:4b
-  timeout: 10.0
+[meeting]
+enabled = true
+detect_subprocess = true
 
-privacy:
-  exclude_apps:
-    - "1Password.exe"
-    - "KeePass.exe"
-    - "LastPass.exe"
-    - "Bitwarden.exe"
-  exclude_titles:
-    - ".*[Pp]assword.*"
-    - ".*[Pp]rivate.*"
+[llm]
+enabled = false  # Set to true if Ollama is installed
+model = "gemma3:4b"
+timeout = 10.0
+
+[privacy]
+exclude_apps = [
+  "1Password.exe",
+  "KeePass.exe",
+  "LastPass.exe",
+  "Bitwarden.exe"
+]
+exclude_titles = [
+  ".*[Pp]assword.*",
+  ".*[Pp]rivate.*"
+]
 ```
 
 ## Troubleshooting

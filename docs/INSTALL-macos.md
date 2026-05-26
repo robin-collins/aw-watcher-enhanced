@@ -147,14 +147,14 @@ The watcher auto-detects Ollama. To customize, edit the config:
 
 ```bash
 # Config location
-~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.yaml
+~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.toml
 ```
 
-```yaml
-llm:
-  enabled: true
-  model: "gemma3:4b"  # or qwen2.5:7b for better accuracy
-  timeout: 10.0
+```toml
+[llm]
+enabled = true
+model = "gemma3:4b"  # or qwen2.5:7b for better accuracy
+timeout = 10.0
 ```
 
 ## Optional: RAG Database (Qdrant)
@@ -235,49 +235,52 @@ tail -f ~/Library/Logs/activitywatch/aw-watcher-enhanced.log
 
 Config file location:
 ```
-~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.yaml
+~/Library/Application Support/activitywatch/aw-watcher-enhanced/config.toml
 ```
 
 ### Recommended macOS Config
 
-```yaml
-watcher:
-  poll_time: 5.0
-  pulsetime: 6.0
+```toml
+[watcher]
+poll_time = 5.0
+pulsetime = 6.0
 
-smart_capture:
-  idle_threshold: 60.0
-  idle_poll_time: 30.0
-  remote_desktop_interval: 10.0
-  ocr_diff:
-    similarity_threshold: 0.85
-    min_change_chars: 50
+[smart_capture]
+idle_threshold = 60.0
+idle_poll_time = 30.0
+remote_desktop_interval = 10.0
 
-ocr:
-  enabled: true
-  trigger: adaptive     # Only fires OCR when primary data is thin
-  engine: auto          # Uses Apple Vision automatically
+[smart_capture.ocr_diff]
+similarity_threshold = 0.85
+min_change_chars = 50
 
-browser:
-  enabled: true         # Merge URL data from aw-watcher-web
+[ocr]
+enabled = true
+trigger = "adaptive"     # Only fires OCR when primary data is thin
+engine = "auto"          # Uses Apple Vision automatically
 
-meeting:
-  enabled: true
-  detect_subprocess: true
+[browser]
+enabled = true         # Merge URL data from aw-watcher-web
 
-llm:
-  enabled: true
-  model: gemma3:4b
-  timeout: 10.0
+[meeting]
+enabled = true
+detect_subprocess = true
 
-privacy:
-  exclude_apps:
-    - "1Password 7"
-    - "Keychain Access"
-    - "Secrets"
-  exclude_titles:
-    - ".*[Pp]assword.*"
-    - ".*[Pp]rivate.*"
+[llm]
+enabled = true
+model = "gemma3:4b"
+timeout = 10.0
+
+[privacy]
+exclude_apps = [
+  "1Password 7",
+  "Keychain Access",
+  "Secrets"
+]
+exclude_titles = [
+  ".*[Pp]assword.*",
+  ".*[Pp]private.*"
+]
 ```
 
 ## Troubleshooting
